@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Simple Diary</title>
+  <style>
+    :root {
+      --bg: #0b0c0f;
+      --panel: #151821;
+      --text: #e6e6e6;
+      --muted: #a9b0be;
+      --accent: #7aa2f7;
+      --danger: #ef4444;
+      --ok: #22c55e;
+      --border: #2a2f3a;
+    }
+    :root.light {
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --text: #111827;
+      --muted: #4b5563;
+      --accent: #2563eb;
+      --danger: #b91c1c;
+      --ok: #16a34a;
+      --border: #e5e7eb;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.4;
+    }
+
+    .container {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .brand { font-weight: 700; letter-spacing: 0.3px; }
+    .muted { color: var(--muted); }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+      box-shadow: 0 10px 24px rgba(0,0,0,.12);
+    }
+
+    .row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .grow { flex: 1 1 240px; }
+
+    input, textarea, select, button {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 10px 12px;
+      border-radius: 10px;
+      outline: none;
+      width: 100%;
+    }
+    textarea { min-height: 140px; resize: vertical; }
+    button {
+      cursor: pointer; border: 1px solid var(--border);
+      background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 18%, transparent), transparent);
+    }
+    button.primary { border-color: color-mix(in oklab, var(--accent) 50%, var(--border)); }
+    button.danger { border-color: color-mix(in oklab, var(--danger) 60%, var(--border)); }
+    button.ok { border-color: color-mix(in oklab, var(--ok) 60%, var(--border)); }
+
+    .toolbar { display: flex; gap: 10px; flex-wrap: wrap; }
+
+    .entry { padding: 14px; border: 1px solid var(--border); border-radius: 12px; }
+    .entry header { margin: 0 0 8px 0; }
+    .entry-title { font-weight: 600; }
+
+    .spacer { height: 8px; }
+
+    .hidden { display: none !important; }
+
+    .switch {
+      display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+      user-select: none;
+    }
+    .switch input { display: none; }
+    .switch .track {
+      width: 42px; height: 24px; border-radius: 999px; position: relative;
+      background: var(--border);
+    }
+    .switch .thumb {
+      position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
+      border-radius: 50%; background: var(--text); transition: transform .2s ease;
+    }
+    .switch input:checked + .track .thumb { transform: translateX(18px); }
+
+    .notice { font-size: 14px; color: var(--muted); }
+    .right { margin-left: auto; }
+    .nowrap { white-space: nowrap; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+
+    footer { margin-top: 24px; color: var(--muted); font-size: 14px; display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+    a { color: var(--accent); text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header>
+      <div>
+        <div class="brand">📓 Simple Diary</div>
+        <div class="muted" id="welcome"></div>
+      </div>
+      <label class="switch" title="Toggle dark mode">
+        <input type="checkbox" id="themeToggle" />
+        <div class="track"><div class="thumb"></div></div>
+        <span class="muted nowrap">Dark mode</span>
+      </label>
+    </header>
+
+    <!-- Auth Panel -->
+    <section class="panel" id="authPanel">
+      <h2 style="margin-top:0">Sign in</h2>
+      <div class="notice">This demo stores data in your browser (localStorage). Do not use real passwords.</div>
+      <div class="spacer"></div>
+      <div class="row">
+        <div class="grow"><label>Username<input id="username" autocomplete="username" /></label></div>
+        <div class="grow"><label>Password<input id="password" type="password" autocomplete="current-password" /></label></div>
+      </div>
+      <div class="spacer"></div>
+      <div class="toolbar">
+        <button class="primary" id="loginBtn">Sign in</button>
+        <button id="registerBtn">Register</button>
+      </div>
+    </section>
+
+    <!-- App Panel -->
+    <section class="panel hidden" id="appPanel">
+      <div class="row" style="align-items:center; margin-bottom: 8px;">
+        <div class="grow"><h2 style="margin:0">Your entries</h2></div>
+        <div class="toolbar">
+          <button id="exportBtn" class="ok">Export JSON</button>
+          <label for="importFile" class="button-like" style="display:inline-flex;align-items:center;gap:8px;cursor:pointer; border:1px solid var(--border); padding:10px 12px; border-radius:10px;">Import JSON<input type="file" id="importFile" accept="application/json" class="hidden"/></label>
+          <button id="logoutBtn" class="danger">Logout</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="grow">
+          <label>Date
+            <input type="date" id="entryDate" />
+          </label>
+        </div>
+        <div class="grow">
+          <label>Title
+            <input type="text" id="entryTitle" placeholder="Optional title" />
+          </label>
+        </div>
+      </div>
+      <div class="spacer"></div>
+      <label>Entry
+        <textarea id="entryText" placeholder="What happened today?"></textarea>
+      </label>
+      <div class="spacer"></div>
+      <div class="toolbar">
+        <button id="saveEntry" class="primary">Save entry</button>
+        <span class="notice" id="saveMsg"></span>
+      </div>
+
+      <div class="spacer"></div>
+      <hr style="border:0; border-top:1px solid var(--border)">
+      <div id="entriesList" style="margin-top:14px; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px;"></div>
+    </section>
+
+    <footer>
+      <span class="notice">Data is saved per-user to your browser. To sync across devices, add a backend later.</span>
+      <a href="https://developer.mozilla.org/" target="_blank" rel="noopener">MDN</a>
+    </footer>
+  </div>
+
+  <script>
+    // ---- Utilities ----
+    const $ = (id) => document.getElementById(id);
+    const escapeHTML = (s) => String(s)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;');
+
+    async function sha256(str) {
+      if (window.crypto?.subtle) {
+        const enc = new TextEncoder().encode(str);
+        const hash = await crypto.subtle.digest('SHA-256', enc);
+        return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+      }
+      // Fallback (very naive) – not cryptographically safe, only for demo
+      let h = 0; for (let i=0;i<str.length;i++){h=(h<<5)-h+str.charCodeAt(i); h|=0;} return String(h);
+    }
+
+    function saveUsers(users){ localStorage.setItem('users', JSON.stringify(users)); }
+    function getUsers(){ try { return JSON.parse(localStorage.getItem('users')||'{}'); } catch { return {}; } }
+
+    function keyFor(user){ return `diary_${user}`; }
+    function loadEntries(user){ try { return JSON.parse(localStorage.getItem(keyFor(user))||'[]'); } catch { return []; } }
+    function saveEntries(user, entries){ localStorage.setItem(keyFor(user), JSON.stringify(entries)); }
+
+    function getTheme(){ return localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); }
+    function setTheme(theme){ localStorage.setItem('theme', theme); document.documentElement.classList.toggle('light', theme==='light'); $('themeToggle').checked = theme==='dark'; }
+
+    function setSession(user){ sessionStorage.setItem('user', user); }
+    function getSession(){ return sessionStorage.getItem('user'); }
+    function clearSession(){ sessionStorage.removeItem('user'); }
+
+    // ---- Theme ----
+    setTheme(getTheme());
+    $('themeToggle').addEventListener('change', (e)=> setTheme(e.target.checked ? 'dark' : 'light'));
+
+    // ---- Auth ----
+    async function register(username, password){
+      username = username.trim();
+      if (!username || !password) throw new Error('Username and password required');
+      const users = getUsers();
+      if (users[username]) throw new Error('User already exists');
+      users[username] = { pass: await sha256(password), createdAt: Date.now() };
+      saveUsers(users);
+      return true;
+    }
+
+    async function login(username, password){
+      const users = getUsers();
+      const u = users[username];
+      if (!u) throw new Error('User not found');
+      const ok = u.pass === await sha256(password);
+      if (!ok) throw new Error('Invalid password');
+      return true;
+    }
+
+    function showApp(user){
+      $('authPanel').classList.add('hidden');
+      $('appPanel').classList.remove('hidden');
+      $('welcome').textContent = `Signed in as @${user}`;
+      $('entryDate').valueAsDate = new Date();
+      renderEntries(user);
+    }
+
+    function showAuth(){
+      $('authPanel').classList.remove('hidden');
+      $('appPanel').classList.add('hidden');
+      $('welcome').textContent = '';
+    }
+
+    $('registerBtn').addEventListener('click', async ()=>{
+      const username = $('username').value; const password = $('password').value;
+      try{ await register(username, password); alert('Registered! You can sign in now.'); }
+      catch(e){ alert(e.message); }
+    });
+
+    $('loginBtn').addEventListener('click', async ()=>{
+      const username = $('username').value; const password = $('password').value;
+      try{ await login(username, password); setSession(username); showApp(username); }
+      catch(e){ alert(e.message); }
+    });
+
+    $('logoutBtn').addEventListener('click', ()=>{ clearSession(); showAuth(); });
+
+    // ---- Entries ----
+    $('saveEntry').addEventListener('click', ()=>{
+      const user = getSession(); if(!user) return;
+      const entries = loadEntries(user);
+      const date = $('entryDate').value || new Date().toISOString().slice(0,10);
+      const title = $('entryTitle').value.trim();
+      const text = $('entryText').value.trim();
+      if(!text){ $('saveMsg').textContent = 'Nothing to save'; return; }
+      const id = crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"_"+Math.random().toString(36).slice(2));
+      entries.unshift({ id, date, title, text, updatedAt: Date.now() });
+      saveEntries(user, entries);
+      $('entryTitle').value = '';
+      $('entryText').value = '';
+      $('saveMsg').textContent = 'Saved!'; setTimeout(()=> $('saveMsg').textContent = '', 1500);
+      renderEntries(user);
+    });
+
+    function renderEntries(user){
+      const root = $('entriesList'); root.innerHTML = '';
+      const entries = loadEntries(user);
+      if(entries.length===0){ root.innerHTML = `<div class="muted">No entries yet. Your saved notes will appear here.</div>`; return; }
+
+      for(const e of entries){
+        const div = document.createElement('div');
+        div.className = 'entry';
+        div.innerHTML = `
+          <header class="row" style="margin:0 0 8px 0; align-items:center;">
+            <div class="entry-title grow">${escapeHTML(e.title || '(No title)')}</div>
+            <div class="muted mono">${escapeHTML(e.date)}</div>
+          </header>
+          <div class="muted" style="white-space:pre-wrap;">${escapeHTML(e.text)}</div>
+          <div class="toolbar" style="margin-top:10px;">
+            <button data-action="edit" data-id="${e.id}">Edit</button>
+            <button class="danger" data-action="delete" data-id="${e.id}">Delete</button>
+          </div>
+        `;
+        root.appendChild(div);
+      }
+
+      // Delegate edit/delete
+      root.querySelectorAll('button').forEach(btn=> btn.addEventListener('click', (ev)=>{
+        const id = ev.target.getAttribute('data-id');
+        const action = ev.target.getAttribute('data-action');
+        if(action==='delete'){
+          if(!confirm('Delete this entry?')) return;
+          const entries = loadEntries(user).filter(x=> x.id!==id);
+          saveEntries(user, entries); renderEntries(user);
+        } else if(action==='edit'){
+          const entries = loadEntries(user);
+          const item = entries.find(x=> x.id===id); if(!item) return;
+          const newTitle = prompt('Edit title:', item.title||'');
+          const newText = prompt('Edit text (use Shift+Enter for new lines in a real app):', item.text);
+          if(newText===null) return; // canceled
+          item.title = newTitle||''; item.text = newText; item.updatedAt = Date.now();
+          saveEntries(user, entries); renderEntries(user);
+        }
+      }));
+    }
+
+    // ---- Export / Import ----
+    $('exportBtn').addEventListener('click', ()=>{
+      const user = getSession(); if(!user) return;
+      const blob = new Blob([JSON.stringify(loadEntries(user), null, 2)], {type: 'application/json'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `diary_${user}_${new Date().toISOString().slice(0,10)}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+
+    $('importFile').addEventListener('change', async (e)=>{
+      const user = getSession(); if(!user) return;
+      const file = e.target.files?.[0]; if(!file) return;
+      const text = await file.text();
+      try {
+        const data = JSON.parse(text);
+        if(!Array.isArray(data)) throw new Error('Invalid file');
+        // naive merge: new entries first, avoid exact id duplicates
+        const existing = loadEntries(user);
+        const ids = new Set(existing.map(x=>x.id));
+        const merged = [...data.filter(x=> x && x.id && !ids.has(x.id)), ...existing];
+        saveEntries(user, merged);
+        renderEntries(user);
+        alert('Imported successfully.');
+      } catch(err){
+        alert('Import failed: '+err.message);
+      } finally { e.target.value = ''; }
+    });
+
+    // ---- Auto session restore ----
+    const current = getSession();
+    if(current){ showApp(current); }
+  </script>
+</body>
+</html>
