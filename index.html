@@ -133,7 +133,10 @@
     <!-- Auth Panel -->
     <section class="panel" id="authPanel">
       <h2 style="margin-top:0">Sign in</h2>
-      <div class="notice">This demo stores data in your browser (localStorage). Do not use real passwords.</div>
+      <div class="notice">
+        Data syncs to your backend when signed in (via API). If not signed in, it saves temporarily in your browser.
+        Do not use real passwords.
+      </div>
       <div class="spacer"></div>
       <div class="row">
         <div class="grow"><label>Username<input id="username" autocomplete="username" /></label></div>
@@ -185,13 +188,15 @@
     </section>
 
     <footer>
-      <span class="notice">Data is saved per-user to your browser. To sync across devices, add a backend later.</span>
+      <span class="notice">Signed-in: backend API • Signed-out: local (temporary). You can migrate old local notes later.</span>
       <a href="https://developer.mozilla.org/" target="_blank" rel="noopener">MDN</a>
     </footer>
   </div>
 
   <script>
-    // ---- Utilities ----
+    // =========================
+    // Utilities & Theme
+    // =========================
     const $ = (id) => document.getElementById(id);
     const escapeHTML = (s) => String(s)
       .replaceAll('&', '&amp;')
@@ -206,168 +211,328 @@
         const hash = await crypto.subtle.digest('SHA-256', enc);
         return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
       }
-      // Fallback (very naive) – not cryptographically safe, only for demo
       let h = 0; for (let i=0;i<str.length;i++){h=(h<<5)-h+str.charCodeAt(i); h|=0;} return String(h);
     }
 
-    function saveUsers(users){ localStorage.setItem('users', JSON.stringify(users)); }
-    function getUsers(){ try { return JSON.parse(localStorage.getItem('users')||'{}'); } catch { return {}; } }
-
-    function keyFor(user){ return `diary_${user}`; }
-    function loadEntries(user){ try { return JSON.parse(localStorage.getItem(keyFor(user))||'[]'); } catch { return []; } }
-    function saveEntries(user, entries){ localStorage.setItem(keyFor(user), JSON.stringify(entries)); }
-
     function getTheme(){ return localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); }
     function setTheme(theme){ localStorage.setItem('theme', theme); document.documentElement.classList.toggle('light', theme==='light'); $('themeToggle').checked = theme==='dark'; }
+    setTheme(getTheme());
+    $('themeToggle').addEventListener('change', (e)=> setTheme(e.target.checked ? 'dark' : 'light'));
 
+    // =========================
+    // Session (username for header)
+    // =========================
     function setSession(user){ sessionStorage.setItem('user', user); }
     function getSession(){ return sessionStorage.getItem('user'); }
     function clearSession(){ sessionStorage.removeItem('user'); }
 
-    // ---- Theme ----
-    setTheme(getTheme());
-    $('themeToggle').addEventListener('change', (e)=> setTheme(e.target.checked ? 'dark' : 'light'));
+    // =========================
+    // Local fallback storage (for unsigned / offline)
+    // =========================
+    function saveUsers(users){ localStorage.setItem('users', JSON.stringify(users)); }
+    function getUsers(){ try { return JSON.parse(localStorage.getItem('users')||'{}'); } catch { return {}; } }
+    function keyFor(user){ return `diary_${user}`; }
+    function loadEntriesLocal(user){ try { return JSON.parse(localStorage.getItem(keyFor(user))||'[]'); } catch { return []; } }
+    function saveEntriesLocal(user, entries){ localStorage.setItem(keyFor(user), JSON.stringify(entries)); }
 
-    // ---- Auth ----
-    async function register(username, password){
-      username = username.trim();
-      if (!username || !password) throw new Error('Username and password required');
-      const users = getUsers();
-      if (users[username]) throw new Error('User already exists');
-      users[username] = { pass: await sha256(password), createdAt: Date.now() };
-      saveUsers(users);
-      return true;
+    // =========================
+    // API adapter (set API_BASE!)
+    // =========================
+    const API_BASE = 'https://<your-api-host>'; // e.g., http://localhost:8080 or https://diary-api.onrender.com
+    let token = localStorage.getItem('token') || '';
+    function isSignedIn(){ return Boolean(token); }
+
+    async function api(path, opts={}){
+      const res = await fetch(`${API_BASE}${path}`, {
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        ...opts
+      });
+      if(!res.ok){
+        const err = await res.json().catch(()=>({ error: 'Request failed'}));
+        throw new Error(err.error || res.statusText);
+      }
+      return res.json();
     }
 
-    async function login(username, password){
-      const users = getUsers();
-      const u = users[username];
-      if (!u) throw new Error('User not found');
-      const ok = u.pass === await sha256(password);
-      if (!ok) throw new Error('Invalid password');
-      return true;
+    // Auth via API
+    async function registerUser(username, password){
+      await api('/api/auth/register', { method:'POST', body: JSON.stringify({ username, password }) });
+    }
+    async function loginUser(username, password){
+      const out = await api('/api/auth/login', { method:'POST', body: JSON.stringify({ username, password }) });
+      token = out.token; localStorage.setItem('token', token);
+      return out.user; // { id, username } (ensure your backend returns this)
+    }
+    function logoutUser(){ token=''; localStorage.removeItem('token'); }
+
+    // Entries via API
+    async function listEntries(){ return api('/api/entries'); }
+    async function createEntryAPI({date, title, text}){
+      return api('/api/entries', { method:'POST', body: JSON.stringify({ date, title, text }) });
+    }
+    async function updateEntryAPI(id, data){
+      return api(`/api/entries/${id}`, { method:'PUT', body: JSON.stringify(data) });
+    }
+    async function deleteEntryAPI(id){
+      return api(`/api/entries/${id}`, { method:'DELETE' });
     }
 
-    function showApp(user){
+    // =========================
+    // UI helpers
+    // =========================
+    function showApp(userLabel){
       $('authPanel').classList.add('hidden');
       $('appPanel').classList.remove('hidden');
-      $('welcome').textContent = `Signed in as @${user}`;
+      $('welcome').textContent = `Signed in as @${userLabel}`;
       $('entryDate').valueAsDate = new Date();
-      renderEntries(user);
+      renderEntries();
     }
-
     function showAuth(){
       $('authPanel').classList.remove('hidden');
       $('appPanel').classList.add('hidden');
       $('welcome').textContent = '';
     }
 
+    // =========================
+    // Auth button handlers (API-first, fallback to local)
+    // =========================
     $('registerBtn').addEventListener('click', async ()=>{
-      const username = $('username').value; const password = $('password').value;
-      try{ await register(username, password); alert('Registered! You can sign in now.'); }
-      catch(e){ alert(e.message); }
+      const username = $('username').value.trim(); const password = $('password').value;
+      if(!username || !password){ alert('Username and password required'); return; }
+      try{
+        if (API_BASE.includes('<your-api-host>')) throw new Error('Set API_BASE first');
+        await registerUser(username, password);
+        alert('Registered! You can sign in now.');
+      } catch(e){
+        // Fallback: local register
+        try{
+          const users = getUsers();
+          if (users[username]) throw new Error('User already exists (local)');
+          users[username] = { pass: await sha256(password), createdAt: Date.now() };
+          saveUsers(users);
+          alert('Registered locally (fallback). Set API_BASE and try backend later.');
+        } catch(err){ alert(err.message); }
+      }
     });
 
     $('loginBtn').addEventListener('click', async ()=>{
-      const username = $('username').value; const password = $('password').value;
-      try{ await login(username, password); setSession(username); showApp(username); }
-      catch(e){ alert(e.message); }
+      const username = $('username').value.trim(); const password = $('password').value;
+      if(!username || !password){ alert('Username and password required'); return; }
+      try{
+        if (API_BASE.includes('<your-api-host>')) throw new Error('Set API_BASE first');
+        const user = await loginUser(username, password);
+        setSession(user?.username || username);
+        showApp(user?.username || username);
+      } catch(e){
+        // Fallback: local login
+        try{
+          const users = getUsers();
+          const u = users[username];
+          if (!u) throw new Error('User not found (local)');
+          const ok = u.pass === await sha256(password);
+          if (!ok) throw new Error('Invalid password (local)');
+          setSession(username);
+          showApp(username);
+          alert('Using local mode (no backend token).');
+        } catch(err){ alert(err.message); }
+      }
     });
 
-    $('logoutBtn').addEventListener('click', ()=>{ clearSession(); showAuth(); });
+    $('logoutBtn').addEventListener('click', ()=>{
+      logoutUser();
+      clearSession();
+      showAuth();
+    });
 
-    // ---- Entries ----
-    $('saveEntry').addEventListener('click', ()=>{
+    // =========================
+    // Entries: API-first with local fallback
+    // =========================
+    async function fetchEntries(){
+      if (isSignedIn()){
+        try { return await listEntries(); }
+        catch(e){ console.warn('Entries API failed, falling back to local:', e.message); }
+      }
+      const user = getSession(); if(!user) return [];
+      return loadEntriesLocal(user);
+    }
+
+    async function addEntry({date, title, text}){
+      if (isSignedIn()){
+        try { return await createEntryAPI({date, title, text}); }
+        catch(e){ console.warn('Create API failed, saving local:', e.message); }
+      }
       const user = getSession(); if(!user) return;
-      const entries = loadEntries(user);
+      const entries = loadEntriesLocal(user);
+      const id = crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"_"+Math.random().toString(36).slice(2));
+      entries.unshift({ id, date, title, text, updatedAt: Date.now() });
+      saveEntriesLocal(user, entries);
+      return { id, date, title, text };
+    }
+
+    async function editEntry(id, data){
+      if (isSignedIn()){
+        try { return await updateEntryAPI(id, data); }
+        catch(e){ console.warn('Update API failed, updating local:', e.message); }
+      }
+      const user = getSession(); if(!user) return;
+      const entries = loadEntriesLocal(user);
+      const item = entries.find(x=> (x.id || x._id) === id);
+      if (!item) return;
+      Object.assign(item, data, { updatedAt: Date.now() });
+      saveEntriesLocal(user, entries);
+      return item;
+    }
+
+    async function removeEntry(id){
+      if (isSignedIn()){
+        try { return await deleteEntryAPI(id); }
+        catch(e){ console.warn('Delete API failed, deleting local:', e.message); }
+      }
+      const user = getSession(); if(!user) return;
+      const entries = loadEntriesLocal(user).filter(x=> (x.id || x._id) !== id);
+      saveEntriesLocal(user, entries);
+      return { ok: true };
+    }
+
+    // Create
+    $('saveEntry').addEventListener('click', async ()=>{
+      const user = getSession(); if(!user && !isSignedIn()) return;
       const date = $('entryDate').value || new Date().toISOString().slice(0,10);
       const title = $('entryTitle').value.trim();
       const text = $('entryText').value.trim();
       if(!text){ $('saveMsg').textContent = 'Nothing to save'; return; }
-      const id = crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"_"+Math.random().toString(36).slice(2));
-      entries.unshift({ id, date, title, text, updatedAt: Date.now() });
-      saveEntries(user, entries);
-      $('entryTitle').value = '';
-      $('entryText').value = '';
-      $('saveMsg').textContent = 'Saved!'; setTimeout(()=> $('saveMsg').textContent = '', 1500);
-      renderEntries(user);
+      try{
+        await addEntry({ date, title, text });
+        $('entryTitle').value = '';
+        $('entryText').value = '';
+        $('saveMsg').textContent = 'Saved!';
+        setTimeout(()=> $('saveMsg').textContent = '', 1500);
+        renderEntries();
+      } catch(err){
+        alert('Save failed: ' + err.message);
+      }
     });
 
-    function renderEntries(user){
+    // Render list (supports API or local shapes)
+    async function renderEntries(){
       const root = $('entriesList'); root.innerHTML = '';
-      const entries = loadEntries(user);
-      if(entries.length===0){ root.innerHTML = `<div class="muted">No entries yet. Your saved notes will appear here.</div>`; return; }
+      const entries = await fetchEntries();
+
+      if(!entries || entries.length===0){
+        root.innerHTML = `<div class="muted">No entries yet. Your saved notes will appear here.</div>`;
+        return;
+      }
 
       for(const e of entries){
+        const id = e.id || e._id;                 // support both shapes
+        const title = e.title || '(No title)';
+        const text = e.text ?? e.content ?? '';   // API might use 'text' or 'content'
+        const date = (e.date ? String(e.date).slice(0,10) : '');
+
         const div = document.createElement('div');
         div.className = 'entry';
         div.innerHTML = `
           <header class="row" style="margin:0 0 8px 0; align-items:center;">
-            <div class="entry-title grow">${escapeHTML(e.title || '(No title)')}</div>
-            <div class="muted mono">${escapeHTML(e.date)}</div>
+            <div class="entry-title grow">${escapeHTML(title)}</div>
+            <div class="muted mono">${escapeHTML(date)}</div>
           </header>
-          <div class="muted" style="white-space:pre-wrap;">${escapeHTML(e.text)}</div>
+          <div class="muted" style="white-space:pre-wrap;">${escapeHTML(text)}</div>
           <div class="toolbar" style="margin-top:10px;">
-            <button data-action="edit" data-id="${e.id}">Edit</button>
-            <button class="danger" data-action="delete" data-id="${e.id}">Delete</button>
+            <button data-action="edit" data-id="${id}">Edit</button>
+            <button class="danger" data-action="delete" data-id="${id}">Delete</button>
           </div>
         `;
         root.appendChild(div);
       }
 
       // Delegate edit/delete
-      root.querySelectorAll('button').forEach(btn=> btn.addEventListener('click', (ev)=>{
+      root.querySelectorAll('button').forEach(btn=> btn.addEventListener('click', async (ev)=>{
         const id = ev.target.getAttribute('data-id');
         const action = ev.target.getAttribute('data-action');
         if(action==='delete'){
           if(!confirm('Delete this entry?')) return;
-          const entries = loadEntries(user).filter(x=> x.id!==id);
-          saveEntries(user, entries); renderEntries(user);
+          await removeEntry(id);
+          renderEntries();
         } else if(action==='edit'){
-          const entries = loadEntries(user);
-          const item = entries.find(x=> x.id===id); if(!item) return;
+          // basic prompt editors
+          const entriesNow = await fetchEntries();
+          const item = entriesNow.find(x => (x.id || x._id) === id);
+          if(!item) return;
           const newTitle = prompt('Edit title:', item.title||'');
-          const newText = prompt('Edit text (use Shift+Enter for new lines in a real app):', item.text);
-          if(newText===null) return; // canceled
-          item.title = newTitle||''; item.text = newText; item.updatedAt = Date.now();
-          saveEntries(user, entries); renderEntries(user);
+          if (newTitle === null) return;
+          const currentText = item.text ?? item.content ?? '';
+          const newText = prompt('Edit text (use Shift+Enter for new lines in a real app):', currentText);
+          if(newText===null) return;
+          await editEntry(id, { title: newTitle || '', text: newText });
+          renderEntries();
         }
       }));
     }
 
-    // ---- Export / Import ----
-    $('exportBtn').addEventListener('click', ()=>{
-      const user = getSession(); if(!user) return;
-      const blob = new Blob([JSON.stringify(loadEntries(user), null, 2)], {type: 'application/json'});
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `diary_${user}_${new Date().toISOString().slice(0,10)}.json`;
-      a.click();
-      URL.revokeObjectURL(a.href);
+    // =========================
+    // Export / Import (API-aware)
+    // =========================
+    $('exportBtn').addEventListener('click', async ()=>{
+      try{
+        const data = await fetchEntries();
+        const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `diary_${(getSession()||'user')}_${new Date().toISOString().slice(0,10)}.json`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+      } catch(err){
+        alert('Export failed: ' + err.message);
+      }
     });
 
     $('importFile').addEventListener('change', async (e)=>{
-      const user = getSession(); if(!user) return;
       const file = e.target.files?.[0]; if(!file) return;
       const text = await file.text();
       try {
         const data = JSON.parse(text);
         if(!Array.isArray(data)) throw new Error('Invalid file');
-        // naive merge: new entries first, avoid exact id duplicates
-        const existing = loadEntries(user);
-        const ids = new Set(existing.map(x=>x.id));
-        const merged = [...data.filter(x=> x && x.id && !ids.has(x.id)), ...existing];
-        saveEntries(user, merged);
-        renderEntries(user);
+        // Create one-by-one via API if signed in; else merge locally
+        if (isSignedIn()){
+          for (const it of data){
+            const payload = {
+              date: it.date ? String(it.date).slice(0,10) : undefined,
+              title: it.title || '',
+              text: it.text ?? it.content ?? ''
+            };
+            if (!payload.text) continue;
+            await createEntryAPI(payload);
+          }
+        } else {
+          const user = getSession(); if(!user) throw new Error('Not signed in and no local user');
+          const existing = loadEntriesLocal(user);
+          const ids = new Set(existing.map(x=>x.id||x._id));
+          const merged = [...data.filter(x=> x && (x.id||x._id) && !ids.has(x.id||x._id)), ...existing];
+          saveEntriesLocal(user, merged);
+        }
+        renderEntries();
         alert('Imported successfully.');
       } catch(err){
         alert('Import failed: '+err.message);
       } finally { e.target.value = ''; }
     });
 
-    // ---- Auto session restore ----
-    const current = getSession();
-    if(current){ showApp(current); }
+    // =========================
+    // Auto-restore
+    // =========================
+    (async function boot(){
+      // If token exists from previous session, go straight to app
+      if (isSignedIn()){
+        setSession(getSession() || 'you');
+        showApp(getSession());
+        return;
+      }
+      const current = getSession();
+      if(current){ showApp(current); }
+    })();
   </script>
 </body>
 </html>
